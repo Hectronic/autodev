@@ -1,4 +1,4 @@
-#!/home/developer/work/autodev/.venv/bin/python
+#!/home/developer/repos/hector/autodev/.venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys
