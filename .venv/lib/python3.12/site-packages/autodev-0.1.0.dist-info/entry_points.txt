@@ -1,0 +1,2 @@
+[console_scripts]
+autodev = autodev_cli.cli:cli
