@@ -13,6 +13,8 @@ def test_cli_help(runner):
     assert "autodev" in result.output
     assert "-dev" in result.output
     assert "-ut" in result.output
+    assert "-e" in result.output
+    assert "--explain" in result.output
     assert "push" in result.output
     assert "history" in result.output
 
@@ -88,6 +90,23 @@ def test_cli_unit_test_command_with_push(runner):
             base_branch="origin/main",
             push=True,
         )
+
+
+def test_cli_explain_command(runner):
+    with patch("autodev_cli.cli.AutoDevOrchestrator") as mock_orchestrator:
+        mock_instance = mock_orchestrator.return_value
+        mock_instance.run_explain = MagicMock()
+
+        result = runner.invoke(
+            cli,
+            ["-e", "--agent", "codex"],
+        )
+
+        assert result.exit_code == 0
+        mock_orchestrator.assert_called_once()
+        args, kwargs = mock_orchestrator.call_args
+        assert kwargs["agent"] == "codex"
+        mock_instance.run_explain.assert_called_once_with()
 
 def test_cli_invalid_agent(runner):
     result = runner.invoke(cli, ["-dev", "probar", "-a", "invalid"])

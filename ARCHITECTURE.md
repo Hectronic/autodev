@@ -9,6 +9,7 @@ Este documento describe la arquitectura interna de `autodev`, una herramienta de
 - Implementada con `click`.
 - Expone el comando `-dev`.
 - Expone el comando `-ut` para revisar cobertura de una rama respecto a su base.
+- Expone el comando `-e` y el alias `--explain` para inspeccionar el repositorio y generar un informe tecnico standalone.
 - Expone `push` para generar un commit automático a partir de los cambios locales y empujar la rama actual.
 - Expone `history` para listar las 10 sesiones más recientes y, opcionalmente, inspeccionar el detalle de una sesión concreta.
 - Recibe instrucciones de desarrollo como argumento posicional, además de ruta del proyecto y agente externo.
@@ -23,6 +24,8 @@ Este documento describe la arquitectura interna de `autodev`, una herramienta de
 - Cuando la sesión es nueva, carga `README.md`, `GEMINI.md` y `AGENTS.md` si existen, y reserva una fase específica para documentación.
 - En el modo `-ut`, resuelve la rama base, calcula el `merge-base`, analiza el diff y guía la revisión de cobertura por fases.
 - En el modo `-ut`, también incorpora el estado pendiente del working tree para que la revisión cubra cambios staged, unstaged y archivos no trackeados.
+- En el modo `-e`/`--explain`, analiza el repositorio sin modificarlo, pide al agente de IA que genere una sección Markdown por tema y compone un HTML standalone con navegación.
+- En el modo `-e`/`--explain`, cada sección generada se persiste como entrada/salida individual dentro de la sesión para conservar trazabilidad completa.
 - Genera logs, Markdown, HTML y metadatos en la carpeta de datos del usuario.
 
 ### 3. Clientes de IA
@@ -59,6 +62,13 @@ Flujo `-ut`:
 5. Revisión de cobertura y detección de gaps.
 6. Remediación de gaps.
 7. Validación final y generación del reporte.
+
+Flujo `-e`:
+1. Identificación del proyecto y verificación de que el directorio sea Git.
+2. Captura de la estructura del repositorio, módulos, documentación y tests.
+3. Elaboración de secciones Markdown para stack, arquitectura, diseño, funcionalidad, tests y riesgos.
+4. Ensamblado de un `summary.md` y un `summary.html` standalone con índice interno.
+5. Persistencia de artefactos y cierre de sesión.
 
 ## Trazabilidad
 

@@ -1,5 +1,7 @@
 import datetime
 import os
+from pathlib import Path
+import unicodedata
 import uuid
 
 from .codex_client import CodexClient
@@ -7,7 +9,7 @@ from .gemini_client import GeminiClient
 from .git_manager import GitManager
 from .history_manager import HistoryManager
 from .project_detector import ProjectDetector
-from .reporting import open_html_report, write_html_report
+from .reporting import open_html_report, write_html_report, write_sectioned_html_report
 from .runtime_store import RuntimeStore
 
 
@@ -495,6 +497,132 @@ class AutoDevOrchestrator:
         finally:
             self._finalize_session(session_status)
 
+    def run_explain(self):
+        session_status = "completed"
+
+        try:
+            print("--- Project identification phase ---")
+            self.workflow_name = "explain"
+            self.project_info = self.detector.detect()
+            if not self.project_info["is_git"]:
+                print(f"ERROR: {self.project_path} no es un repositorio Git válido.")
+                print("autodev solo puede ejecutarse dentro de repositorios Git para analizar el proyecto.")
+                return
+
+            print(f"Project Type: {self.project_info['project_type']}")
+            print(f"Test Runner: {self.project_info['test_runner']}")
+            print(f"Git Repository: {self.project_info['is_git']}")
+
+            self.branch_name = self.git.get_current_branch()
+            self.base_branch_name = None
+            self.merge_base_sha = None
+            self.session_id = str(uuid.uuid4())
+            self.resume_mode = False
+            self._prepare_session_artifacts()
+
+            instructions = "Analisis exploratorio del repositorio para generar un informe tecnico completo."
+            self.history.create_session(
+                self.session_id,
+                self.project_path,
+                self.agent_name,
+                instructions,
+                self.results_dir,
+                branch_name=self.branch_name,
+                workflow=self.workflow_name,
+                status="running",
+                log_path=self.log_file,
+                summary_md_path=self.summary_md_path,
+                summary_html_path=self.summary_html_path,
+                agent_session_id=None,
+                head_sha=self.git.get_head_sha(),
+            )
+
+            self.history.update_session(
+                self.session_id,
+                branch_name=self.branch_name,
+                workflow=self.workflow_name,
+                status="running",
+                results_dir=self.results_dir,
+                log_path=self.log_file,
+                summary_md_path=self.summary_md_path,
+                summary_html_path=self.summary_html_path,
+                head_sha=self.git.get_head_sha(),
+            )
+            self._write_session_manifest(status="running")
+
+            snapshot = self._collect_explain_snapshot()
+            sections = self._build_explain_sections(snapshot)
+
+            for index, section in enumerate(sections, start=1):
+                step_slug = self._slugify_label(section["title"])
+                print(f"--- {section['title']} phase ---")
+                response = self.ai.run_prompt(section["prompt"], resume=self.resume_mode or index > 1)
+                input_path = self.storage.session_file(
+                    self.session_id,
+                    f"inputs/{index:02d}_{step_slug}.md",
+                )
+                output_path = self.storage.session_file(
+                    self.session_id,
+                    f"outputs/{index:02d}_{step_slug}.md",
+                )
+                self.storage.write_text(input_path, section["prompt"])
+                self.storage.write_text(output_path, response)
+                section["markdown"] = response
+                self.history.save_step(
+                    self.session_id,
+                    section["title"],
+                    section["prompt"],
+                    response,
+                    step_order=index,
+                    input_path=str(input_path),
+                    output_path=str(output_path),
+                )
+                self.history.update_session(
+                    self.session_id,
+                    agent_session_id=self._get_agent_session_id(),
+                    head_sha=self.git.get_head_sha(),
+                )
+
+            final_markdown = self._compose_explain_report(snapshot, sections)
+            report_path = self.storage.session_file(self.session_id, "final_report.md")
+            summary_md_path = self.storage.session_file(self.session_id, "summary.md")
+            summary_html_path = self.storage.session_file(self.session_id, "summary.html")
+            self.summary_md_path = str(summary_md_path)
+            self.summary_html_path = str(summary_html_path)
+            self.storage.write_text(report_path, final_markdown)
+            self.storage.write_text(summary_md_path, final_markdown)
+            write_sectioned_html_report(
+                summary_html_path,
+                sections,
+                {
+                    "title": "autodev explain summary",
+                    "session_id": self.session_id,
+                    "branch_name": self.branch_name,
+                    "agent": self.agent_name,
+                    "project_path": self.project_path,
+                    "status": "completed",
+                    "results_dir": self.results_dir,
+                },
+            )
+
+            if not open_html_report(summary_html_path):
+                print(f"No se pudo abrir automaticamente el HTML. Ruta: {summary_html_path}")
+
+            print("\n" + "=" * 40)
+            print("RESUMEN FINAL:")
+            print("=" * 40)
+            print(final_markdown)
+            print("=" * 40 + "\n")
+
+            print(f"Session ID: {self.session_id}")
+            print(f"Branch: {self.branch_name or 'detached'}")
+            print(f"Log and report saved in: {self.results_dir}")
+        except Exception:
+            session_status = "failed"
+            raise
+        finally:
+            self._finalize_session(session_status)
+
     def _build_plan_prompt(self, instructions):
         return (
             "Actua como un desarrollador senior y planificador tecnico.\n"
@@ -690,7 +818,8 @@ class AutoDevOrchestrator:
             self.ai.session_id = session_row["agent_session_id"]
 
     def _slugify_label(self, label):
-        return "".join(ch.lower() if ch.isalnum() else "_" for ch in label).strip("_")
+        normalized = unicodedata.normalize("NFKD", label or "").encode("ascii", "ignore").decode("ascii")
+        return "".join(ch.lower() if ch.isalnum() else "_" for ch in normalized).strip("_") or "section"
 
     def _compose_final_report(self, validation_report, instructions, steps, branch_name):
         step_lines = []
@@ -739,6 +868,365 @@ class AutoDevOrchestrator:
             "## Informe final\n\n"
             f"{report}\n"
         )
+
+    def _collect_explain_snapshot(self):
+        root = Path(self.project_path)
+        return {
+            "project_path": self.project_path,
+            "branch_name": self.branch_name,
+            "head_sha": self.git.get_head_sha(),
+            "project_info": self.project_info or {},
+            "tree": self._build_repo_tree(root),
+            "top_level_entries": self._collect_top_level_entries(root),
+            "documentation_files": self._collect_documentation_files(root),
+            "python_modules": self._collect_python_modules(root),
+            "test_files": self._collect_test_files(root),
+            "source_files": self._collect_source_files(root),
+            "setup_files": self._collect_setup_files(root),
+        }
+
+    def _build_explain_sections(self, snapshot):
+        return [
+            {
+                "id": "resumen-ejecutivo",
+                "title": "Resumen ejecutivo",
+                "prompt": self._build_explain_section_prompt(
+                    snapshot,
+                    "Resumen ejecutivo",
+                    "Redacta una introduccion breve del repositorio, el alcance del informe y la lectura rapida del proyecto. "
+                    "Destaca el objetivo general del codigo y evita inventar funcionalidades no observadas.",
+                ),
+                "markdown": "",
+            },
+            {
+                "id": "stack",
+                "title": "Stack",
+                "prompt": self._build_explain_section_prompt(
+                    snapshot,
+                    "Stack",
+                    "Describe el stack detectado y la evidencia concreta disponible en el arbol del repositorio. "
+                    "Incluye tipo de proyecto, runner de pruebas, archivos de empaquetado o entrada y modulos principales.",
+                ),
+                "markdown": "",
+            },
+            {
+                "id": "arquitectura",
+                "title": "Arquitectura",
+                "prompt": self._build_explain_section_prompt(
+                    snapshot,
+                    "Arquitectura",
+                    "Analiza la estructura del repositorio y las responsabilidades principales de sus modulos. "
+                    "Explica como cooperan CLI, orquestador, persistencia, Git, detector de proyecto y reporting.",
+                ),
+                "markdown": "",
+            },
+            {
+                "id": "diseno",
+                "title": "Diseno",
+                "prompt": self._build_explain_section_prompt(
+                    snapshot,
+                    "Diseno",
+                    "Analiza modularidad, separacion de responsabilidades, trazabilidad de sesiones y experiencia de uso. "
+                    "Incluye observaciones sobre el HTML autocontenido y las limitaciones del enfoque heuristico.",
+                ),
+                "markdown": "",
+            },
+            {
+                "id": "funcionalidad",
+                "title": "Funcionalidad",
+                "prompt": self._build_explain_section_prompt(
+                    snapshot,
+                    "Funcionalidad",
+                    "Resume la funcionalidad observable del repositorio y los comandos o flujos expuestos por la CLI. "
+                    "Incluye para que sirve el proyecto y que problemas resuelve.",
+                ),
+                "markdown": "",
+            },
+            {
+                "id": "tests",
+                "title": "Tests",
+                "prompt": self._build_explain_section_prompt(
+                    snapshot,
+                    "Tests",
+                    "Inventaria las pruebas detectadas y explica el enfoque de testing que se deduce del repositorio. "
+                    "Separa el inventario del analisis del estilo de pruebas y de los huecos potenciales.",
+                ),
+                "markdown": "",
+            },
+            {
+                "id": "riesgos",
+                "title": "Riesgos y conclusiones",
+                "prompt": self._build_explain_section_prompt(
+                    snapshot,
+                    "Riesgos y conclusiones",
+                    "Cierra el informe con riesgos detectados, limitaciones del analisis y una conclusion ejecutiva. "
+                    "Indica de forma explicita si el repositorio parece coherente con el flujo de autodev.",
+                ),
+                "markdown": "",
+            },
+        ]
+
+    def _compose_explain_report(self, snapshot, sections):
+        section_lines = []
+        for section in sections or []:
+            section_lines.append(f"## {section['title']}\n\n{section['markdown'].strip()}\n")
+        sections_text = "\n".join(section_lines)
+        project_info = snapshot.get("project_info", {})
+        return (
+            "# Informe de exploracion del repositorio\n\n"
+            f"- Session ID: {self.session_id}\n"
+            f"- Branch: {self.branch_name or 'detached'}\n"
+            f"- Project path: {self.project_path}\n"
+            f"- Stack: {project_info.get('project_type', 'desconocido')} con {project_info.get('test_runner', 'desconocido')}\n"
+            f"- Head SHA: {snapshot.get('head_sha') or 'n/a'}\n\n"
+            "## Secciones\n\n"
+            + "\n".join(f"- [{section['title']}](#{self._slugify_label(section['title'])})" for section in sections)
+            + "\n\n"
+            + sections_text
+        )
+
+    def _build_explain_section_prompt(self, snapshot, section_title, focus):
+        project_info = snapshot.get("project_info", {})
+        tree = snapshot.get("tree", [])
+        top_level_entries = snapshot.get("top_level_entries", [])
+        documentation_files = snapshot.get("documentation_files", [])
+        python_modules = snapshot.get("python_modules", [])
+        test_files = snapshot.get("test_files", [])
+        source_files = snapshot.get("source_files", [])
+        setup_files = snapshot.get("setup_files", [])
+
+        return (
+            "Actua como un analista tecnico senior y genera una unica seccion de un informe Markdown.\n"
+            f"Seccion a redactar: {section_title}\n"
+            f"Foco de la seccion: {focus}\n"
+            f"Contexto del proyecto: {project_info.get('project_type', 'desconocido')} usando {project_info.get('test_runner', 'desconocido')}.\n"
+            f"Ruta del proyecto: {self.project_path}\n"
+            f"Rama actual: {snapshot.get('branch_name') or 'detached'}\n"
+            f"Head SHA: {snapshot.get('head_sha') or 'n/a'}\n\n"
+            "Arbol resumido del repositorio:\n"
+            f"{self._format_bullet_block(tree, fallback='Sin arbol disponible.')}\n\n"
+            "Entradas de primer nivel:\n"
+            f"{self._format_bullet_block(top_level_entries, fallback='Sin entradas detectadas.')}\n\n"
+            "Documentacion detectada:\n"
+            f"{self._format_bullet_block([doc['name'] for doc in documentation_files], fallback='No se detecto documentacion de referencia.')}\n\n"
+            "Modulos Python principales:\n"
+            f"{self._format_bullet_block(python_modules, fallback='No se detectaron modulos Python.')}\n\n"
+            "Archivos de test:\n"
+            f"{self._format_bullet_block(test_files, fallback='No se detectaron pruebas.')}\n\n"
+            "Archivos fuente o de empaquetado relevantes:\n"
+            f"{self._format_bullet_block(source_files, fallback='No se detectaron archivos fuente o de empaquetado.')}\n\n"
+            "Archivos de setup detectados:\n"
+            f"{self._format_bullet_block(setup_files, fallback='No se detectaron archivos de setup.')}\n\n"
+            "Instrucciones de salida:\n"
+            "- Devuelve solo Markdown.\n"
+            "- No repitas el titulo principal de la seccion.\n"
+            "- Usa subtitulos, listas o notas solo si aportan claridad.\n"
+            "- No afirmes detalles no respaldados por el contexto proporcionado.\n"
+            "- Mantén el tono de un informe tecnico conciso y riguroso."
+        )
+
+    def _build_explain_overview_section(self, snapshot):
+        project_info = snapshot.get("project_info", {})
+        docs = snapshot.get("documentation_files", [])
+        tests = snapshot.get("test_files", [])
+        return (
+            "### Alcance\n"
+            "Este informe describe el estado actual del repositorio sin modificar archivos.\n\n"
+            "### Datos clave\n"
+            f"- Tipo de proyecto: {project_info.get('project_type', 'desconocido')}\n"
+            f"- Test runner: {project_info.get('test_runner', 'desconocido')}\n"
+            f"- Rama actual: {snapshot.get('branch_name') or 'detached'}\n"
+            f"- Archivos de documentacion detectados: {len(docs)}\n"
+            f"- Archivos de test detectados: {len(tests)}\n\n"
+            "### Lectura rapida\n"
+            "El repositorio esta organizado alrededor de una CLI, un orquestador central, adaptadores de IA, persistencia local y utilidades de reporte."
+        )
+
+    def _build_explain_stack_section(self, snapshot):
+        project_info = snapshot.get("project_info", {})
+        setup_files = snapshot.get("setup_files", [])
+        python_modules = snapshot.get("python_modules", [])
+        return (
+            "### Stack detectado\n"
+            f"- Proyecto: {project_info.get('project_type', 'desconocido')}\n"
+            f"- Runner de pruebas: {project_info.get('test_runner', 'desconocido')}\n"
+            f"- Archivos de empaquetado o entrada: {', '.join(setup_files) if setup_files else 'No detectados'}\n\n"
+            "### Evidencias relevantes\n"
+            f"- Modulos principales del paquete: {', '.join(python_modules) if python_modules else 'No detectados'}\n"
+            f"- Documentacion base: {', '.join(doc['name'] for doc in snapshot.get('documentation_files', [])) or 'No detectada'}"
+        )
+
+    def _build_explain_architecture_section(self, snapshot):
+        tree = snapshot.get("tree", [])
+        return (
+            "### Estructura observada\n"
+            f"{self._format_bullet_block(tree, fallback='No se pudo construir un arbol del repositorio.')}\n\n"
+            "### Componentes principales\n"
+            "- `autodev_cli/cli.py`: entrada de comandos y despacho de flujos.\n"
+            "- `autodev_cli/developer_orchestrator.py`: coordinacion de sesiones, prompts y persistencia.\n"
+            "- `autodev_cli/project_detector.py`: deteccion del stack y del runner.\n"
+            "- `autodev_cli/git_manager.py`: aislamiento Git y operaciones de commit/push.\n"
+            "- `autodev_cli/history_manager.py`: almacenamiento en SQLite de sesiones y pasos.\n"
+            "- `autodev_cli/reporting.py`: renderizado Markdown/HTML de los reportes.\n"
+            "- `autodev_cli/codex_client.py` y `autodev_cli/gemini_client.py`: adaptadores de agentes.\n\n"
+            "### Lectura arquitectonica\n"
+            "La base es modular y orientada a responsabilidades claras, aunque el orquestador concentra bastante logica de alto nivel."
+        )
+
+    def _build_explain_design_section(self, snapshot):
+        docs = snapshot.get("documentation_files", [])
+        return (
+            "### Principios que se observan\n"
+            "- Separacion entre orquestacion, persistencia, Git, deteccion de stack y renderizado.\n"
+            "- Trazabilidad de cada ejecucion mediante carpeta de sesion y base SQLite.\n"
+            "- Flujo controlado por fases para mantener el contexto de trabajo.\n\n"
+            "### Observaciones de diseno\n"
+            "- El sistema favorece extensibilidad por comandos y flujos.\n"
+            "- La documentacion se integra como parte del contexto operativo cuando existe.\n"
+            "- El HTML de salida debe ser autocontenido para no depender de recursos externos.\n\n"
+            "### Documentacion presente\n"
+            f"{self._format_bullet_block([doc['name'] for doc in docs], fallback='No se detecto documentacion de referencia.')}"
+        )
+
+    def _build_explain_functionality_section(self, snapshot):
+        test_files = snapshot.get("test_files", [])
+        return (
+            "### Funcionalidad observable\n"
+            "- `-dev`: planifica, desarrolla, documenta, prueba y valida cambios.\n"
+            "- `-ut`: revisa cobertura sobre una rama frente a su base y remedia gaps.\n"
+            "- `push`: genera commit y push de cambios locales.\n"
+            "- `history`: consulta sesiones y pasos guardados.\n"
+            "- `--explain/-e`: explora el repositorio y produce un informe tecnico completo.\n\n"
+            "### Alcance funcional del repositorio\n"
+            "El proyecto se centra en automatizar trabajo asistido por IA sobre repositorios Git con trazabilidad local.\n\n"
+            "### Areas relacionadas con pruebas\n"
+            f"{self._format_bullet_block(test_files, fallback='No se detectaron archivos de prueba.')}"
+        )
+
+    def _build_explain_tests_section(self, snapshot):
+        test_files = snapshot.get("test_files", [])
+        frameworks = self._infer_test_frameworks(test_files)
+        return (
+            "### Inventario de pruebas\n"
+            f"{self._format_bullet_block(test_files, fallback='No se detectaron pruebas en el arbol del proyecto.')}\n\n"
+            "### Enfoque de testing\n"
+            f"{self._format_bullet_block(frameworks, fallback='No se pudo inferir un framework de pruebas.')}\n\n"
+            "### Lectura de calidad\n"
+            "La suite parece mezclar estilos de prueba orientados a pytest y unittest, por lo que conviene mantener la compatibilidad entre ambos."
+        )
+
+    def _build_explain_risks_section(self, snapshot):
+        return (
+            "### Riesgos\n"
+            "- El analisis es heuristico y puede subestimar proyectos grandes o muy heterogeneos.\n"
+            "- El HTML depende de un renderizador propio; si crece el alcance del Markdown, habra que reforzarlo.\n"
+            "- La presencia de tests en varios estilos puede exigir cuidado en futuras ampliaciones.\n\n"
+            "### Conclusion\n"
+            "El repositorio muestra una arquitectura util y trazable para automatizar tareas de desarrollo asistido, con un nuevo flujo de exploracion que encaja sin migraciones de datos."
+        )
+
+    def _collect_top_level_entries(self, root):
+        entries = []
+        for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+            if self._should_skip_path(path):
+                continue
+            entries.append(path.name + ("/" if path.is_dir() else ""))
+        return entries
+
+    def _build_repo_tree(self, root, max_depth=2):
+        lines = []
+
+        def walk(current, depth):
+            if depth > max_depth:
+                return
+            try:
+                children = sorted(current.iterdir(), key=lambda item: (item.is_file(), item.name.lower()))
+            except OSError:
+                return
+            for child in children:
+                if self._should_skip_path(child):
+                    continue
+                prefix = "  " * depth + "- "
+                lines.append(f"{prefix}{child.name}{'/' if child.is_dir() else ''}")
+                if child.is_dir():
+                    walk(child, depth + 1)
+
+        walk(root, 0)
+        return lines[:120]
+
+    def _collect_documentation_files(self, root):
+        docs = []
+        for name in ["README.md", "ARCHITECTURE.md", "GEMINI.md", "AGENTS.md"]:
+            path = root / name
+            if path.exists():
+                docs.append({"name": name, "path": str(path)})
+        return docs
+
+    def _collect_python_modules(self, root):
+        modules_dir = root / "autodev_cli"
+        if not modules_dir.exists():
+            return []
+        modules = []
+        for path in sorted(modules_dir.glob("*.py")):
+            if path.name == "__init__.py":
+                continue
+            modules.append(f"autodev_cli/{path.name}")
+        return modules
+
+    def _collect_test_files(self, root):
+        tests_dir = root / "tests"
+        if not tests_dir.exists():
+            return []
+        files = []
+        for path in sorted(tests_dir.rglob("test_*.py")):
+            files.append(str(path.relative_to(root)))
+        return files
+
+    def _collect_source_files(self, root):
+        source_files = []
+        for name in ["setup.py", "pyproject.toml", "setup.cfg"]:
+            path = root / name
+            if path.exists():
+                source_files.append(name)
+        return source_files
+
+    def _collect_setup_files(self, root):
+        setup_files = []
+        for name in ["setup.py", "pyproject.toml", "setup.cfg", "requirements.txt"]:
+            if (root / name).exists():
+                setup_files.append(name)
+        return setup_files
+
+    def _infer_test_frameworks(self, test_files):
+        frameworks = []
+        if any("pytest" in file for file in test_files):
+            frameworks.append("pytest-style tests detected by file discovery")
+        if test_files:
+            frameworks.append("unittest-compatible suite detected")
+        return frameworks
+
+    def _should_skip_path(self, path):
+        skip_names = {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".tox",
+            ".venv",
+            "venv",
+            "env",
+            "build",
+            "dist",
+            ".eggs",
+            "node_modules",
+            "results",
+        }
+        return path.name in skip_names or path.name.startswith(".") and path.name not in {".", ".."}
+
+    def _format_bullet_block(self, items, fallback="Sin elementos disponibles."):
+        if not items:
+            return fallback
+        return "\n".join(f"- {item}" for item in items)
 
     def _write_session_manifest(self, status):
         payload = {

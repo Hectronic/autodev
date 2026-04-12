@@ -249,6 +249,66 @@ def test_orchestrator_runs_unit_test_flow(tmp_path):
     assert orchestrator.history.get_session(orchestrator.session_id)["merge_base_sha"] == "merge-base-sha"
 
 
+def test_orchestrator_runs_explain_flow(tmp_path):
+    (tmp_path / "README.md").write_text("# Project README\n", encoding="utf-8")
+    (tmp_path / "ARCHITECTURE.md").write_text("# Architecture\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tests" / "test_cli.py").write_text("import unittest\n", encoding="utf-8")
+
+    orchestrator = AutoDevOrchestrator(str(tmp_path))
+    orchestrator.detector.detect = MagicMock(
+        return_value={
+            "is_git": True,
+            "project_type": "python",
+            "test_runner": "unittest",
+            "detected_files": [],
+        }
+    )
+    orchestrator.git.get_current_branch = MagicMock(return_value="main")
+    orchestrator.git.get_head_sha = MagicMock(return_value="head-sha")
+    orchestrator.git.create_branch = MagicMock()
+    orchestrator.git.commit_changes = MagicMock()
+    orchestrator.git.push_branch = MagicMock()
+    orchestrator.ai.run_prompt = MagicMock(
+        side_effect=[
+            "Resumen generado por IA",
+            "Stack generado por IA",
+            "Arquitectura generada por IA",
+            "Diseno generado por IA",
+            "Funcionalidad generada por IA",
+            "Tests generados por IA",
+            "Riesgos y conclusiones generados por IA",
+        ]
+    )
+
+    with patch("autodev_cli.developer_orchestrator.open_html_report", return_value=True):
+        orchestrator.run_explain()
+
+    assert orchestrator.ai.run_prompt.call_count == 7
+    call_kwargs = [call.kwargs for call in orchestrator.ai.run_prompt.call_args_list]
+    assert call_kwargs[0]["resume"] is False
+    assert all(call["resume"] is True for call in call_kwargs[1:])
+
+    orchestrator.git.create_branch.assert_not_called()
+    orchestrator.git.commit_changes.assert_not_called()
+    orchestrator.git.push_branch.assert_not_called()
+    assert orchestrator.history.get_session(orchestrator.session_id)["workflow"] == "explain"
+    assert orchestrator.history.get_session(orchestrator.session_id)["agent"] == "codex"
+
+    session_root = orchestrator.storage.base_dir / "sessions" / orchestrator.session_id
+    assert (session_root / "summary.md").exists()
+    assert (session_root / "summary.html").exists()
+    assert (session_root / "outputs" / "01_resumen_ejecutivo.md").exists()
+    assert (session_root / "outputs" / "07_riesgos_y_conclusiones.md").exists()
+
+    with open(orchestrator.results_dir + "/final_report.md", "r", encoding="utf-8") as handle:
+        report = handle.read()
+        assert "## Stack" in report
+        assert "## Arquitectura" in report
+        assert "## Tests" in report
+        assert "Riesgos y conclusiones generados por IA" in report
+
+
 def test_orchestrator_unit_test_includes_pending_changes(tmp_path):
     orchestrator = AutoDevOrchestrator(str(tmp_path))
     orchestrator.detector.detect = MagicMock(

@@ -16,3 +16,17 @@ Este documento describe los mandatos de diseño de `autodev`.
 3. Testear los cambios.
 4. Validar el resultado final.
 5. Registrar un reporte técnico con el estado de la ejecución.
+
+## Flujo de exploracion
+
+1. Verificar que el repositorio sea un proyecto Git y detectar el stack principal.
+2. Inspeccionar la estructura, los módulos, la documentación y los tests disponibles.
+3. Pedir al agente de IA que genere secciones Markdown separadas para resumen, stack, arquitectura, diseño, funcionalidad, tests y riesgos.
+4. Ensamblar un `summary.md` y un `summary.html` standalone con navegación interna.
+5. Mantener el flujo en modo de solo lectura: no crear ramas ni modificar archivos del proyecto.
+
+## Reglas de reporte
+
+- El HTML final debe ser autocontenido, legible y sin dependencias externas.
+- Cada sección debe quedar persistida también como artefacto Markdown dentro de la sesión.
+- El análisis de arquitectura y diseño es heurístico, por lo que debe dejar claras sus limitaciones cuando el repositorio sea grande o heterogéneo.
