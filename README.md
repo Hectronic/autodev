@@ -23,29 +23,32 @@ cd autodev
 
 ## Uso
 
-La CLI expone los comandos `-dev` para el flujo principal, `-ut` para revisión de cobertura y `history` para consultar las sesiones recientes.
+La CLI expone los comandos `-dev` para el flujo principal, `-ut` para revisión de cobertura, `push` para commitear y empujar cambios locales, y `history` para consultar las sesiones recientes.
 
 ```bash
 # Ayuda
 autodev -h
 
 # Ejecutar el flujo de desarrollo en el directorio actual
-autodev -dev --instructions "Añade un endpoint para exportar reportes en CSV"
+autodev -dev "Añade un endpoint para exportar reportes en CSV"
+
+# Hacer commit y push de la rama creada al finalizar
+autodev -dev "Añade un endpoint para exportar reportes en CSV" --push
 
 # Especificar otra ruta de proyecto
-autodev -dev --path /ruta/al/proyecto --instructions "Implementa autenticación por token"
+autodev -dev --path /ruta/al/proyecto "Implementa autenticación por token"
 
 # Elegir el agente
-autodev -dev --instructions "Crea una vista de detalle" --agent gemini
+autodev -dev "Crea una vista de detalle" --agent gemini
 
 # Revisar cobertura de la rama actual frente a su base
 autodev -ut --base-branch origin/main
 
-# Revisar cobertura con contexto adicional
-autodev -ut --base-branch origin/main --instructions "prioriza el módulo de pagos"
-
 # Ver las 10 últimas sesiones
 autodev history
+
+# Generar un commit automático a partir de los cambios locales y pushear la rama actual
+autodev push
 ```
 
 ## Resultados
@@ -69,7 +72,8 @@ Cada ejecución genera una carpeta propia dentro de la carpeta de datos:
 La ruta puede ajustarse con `XDG_DATA_HOME`.
 
 Si el comando se ejecuta de nuevo en una rama `autodev/*` que tenga una sesión `running`, la herramienta recupera esa sesión y continúa guardando en el mismo `session_id`.
-En el flujo `-ut`, la sesión guarda también la rama base y el `merge-base` usado para la revisión.
+En `-dev`, cuando la sesión es nueva, la herramienta carga `README.md`, `GEMINI.md` y `AGENTS.md` si existen, y añade una fase dedicada a documentar los cambios o actualizar la documentación del repositorio.
+En el flujo `-ut`, la sesión guarda también la rama base y el `merge-base` usado para la revisión. Además, contempla tanto cambios ya commiteados como cambios pendientes en el working tree, y presenta la diff en bloques Markdown separados.
 
 ## Pruebas
 
@@ -83,4 +87,4 @@ pytest tests
 - `autodev_cli/developer_orchestrator.py`: orquestador del flujo planificar -> desarrollar -> testear -> validar.
 - `autodev_cli/gemini_client.py` y `autodev_cli/codex_client.py`: adaptadores para los agentes externos.
 - `autodev_cli/project_detector.py`: detección del stack del proyecto.
-- `autodev_cli/git_manager.py`: aislamiento en Git y commits finales.
+- `autodev_cli/git_manager.py`: aislamiento en Git, generación de mensajes de commit y push finales opcionales.
