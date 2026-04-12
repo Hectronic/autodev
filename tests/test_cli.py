@@ -12,6 +12,8 @@ def test_cli_help(runner):
     assert result.exit_code == 0
     assert "autodev" in result.output
     assert "-dev" in result.output
+    assert "-ut" in result.output
+    assert "history" in result.output
 
 def test_cli_dev_command(runner):
     with patch("autodev_cli.cli.AutoDevOrchestrator") as mock_orchestrator:
@@ -29,6 +31,27 @@ def test_cli_dev_command(runner):
         assert kwargs["agent"] == "codex"
         mock_instance.run.assert_called_once_with(
             instructions="Crear un endpoint para exportar reportes"
+        )
+
+
+def test_cli_unit_test_command(runner):
+    with patch("autodev_cli.cli.AutoDevOrchestrator") as mock_orchestrator:
+        mock_instance = mock_orchestrator.return_value
+        mock_instance.run_unit_test = MagicMock()
+
+        result = runner.invoke(
+            cli,
+            ["-ut", "--base-branch", "origin/main", "--instructions", "revisar auth", "--agent", "codex"],
+        )
+
+        assert result.exit_code == 0
+        mock_orchestrator.assert_called_once()
+        args, kwargs = mock_orchestrator.call_args
+        assert kwargs["agent"] == "codex"
+        mock_instance.run_unit_test.assert_called_once_with(
+            base_branch="origin/main",
+            instructions="revisar auth",
+            no_commit=False,
         )
 
 def test_cli_invalid_agent(runner):

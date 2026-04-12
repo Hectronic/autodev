@@ -1,0 +1,245 @@
+[2026-04-09T18:19:14.182786] --- NEW PROMPT (Codex) ---
+[2026-04-09T18:19:14.183103] Input Prompt: Actua como un desarrollador senior y planificador tecnico.
+Contexto del proyecto: python usando unittest.
+Instrucciones del usuario: quiero que almacene todos los inputs y outputs, que al final pida un resumen en .md y almacene todo en una carpeta local en la home del ususario, tipica carpeta de datos. Al acaba debe generar un html de resumen, en la carpeta de datos y abrirlo en el navegador. debe guardar la rama y el id de ssion de cada ejecucion. si se lanza en una rama que est detectada y tenemos session, debe recuperar la session.
+PASO 1: Analiza el repositorio y redacta un plan de trabajo ordenado por prioridades.
+PASO 2: Identifica archivos, modulos y pruebas que probablemente deban tocarse.
+PASO 3: Define criterios de aceptacion y riesgos.
+No implementes cambios aun. Devuelve un plan accionable y concreto.
+[2026-04-09T18:19:14.183250] Executing Command: codex --yolo exec Actua como un desarrollador senior y planificador tecnico.
+Contexto del proyecto: python usando unittest.
+Instrucciones del usuario: quiero que almacene todos los inputs y outputs, que al final pida un resumen en .md y almacene todo en una carpeta local en la home del ususario, tipica carpeta de datos. Al acaba debe generar un html de resumen, en la carpeta de datos y abrirlo en el navegador. debe guardar la rama y el id de ssion de cada ejecucion. si se lanza en una rama que est detectada y tenemos session, debe recuperar la session.
+PASO 1: Analiza el repositorio y redacta un plan de trabajo ordenado por prioridades.
+PASO 2: Identifica archivos, modulos y pruebas que probablemente deban tocarse.
+PASO 3: Define criterios de aceptacion y riesgos.
+No implementes cambios aun. Devuelve un plan accionable y concreto.
+[2026-04-09T18:20:30.495254] Output Response:
+He revisado el repositorio. Hoy hay dos flujos de persistencia distintos: `results/` dentro del repo en [autodev_cli/developer_orchestrator.py](/home/developer/repos/hector/autodev/autodev_cli/developer_orchestrator.py#L17) y SQLite en `~/.autodev` en [autodev_cli/history_manager.py](/home/developer/repos/hector/autodev/autodev_cli/history_manager.py#L8). Para cubrir tu requisito, el cambio debe unificar todo en una carpeta de datos del usuario y hacer que la sesión sea reanudable por rama.
+
+**Plan priorizado**
+
+1. Unificar almacenamiento en una carpeta de datos local del usuario.
+   - Definir una ruta canónica, idealmente `~/.local/share/autodev/` como carpeta de datos principal.
+   - Mover ahí todos los artefactos de ejecución: inputs, outputs, logs, `final_report.md`, `summary.md`, `summary.html` y metadatos de sesión.
+   - Dejar de usar `results/` dentro del repo como fuente de verdad.
+   - Añadir una capa de abstracción para no repartir rutas por todo el código.
+
+2. Hacer persistencia completa de inputs y outputs.
+   - Guardar cada prompt enviado y cada respuesta recibida por fase, no solo el resumen final.
+   - Registrar metadatos de cada ejecución: `session_id`, rama Git, `project_path`, agente, timestamps, estado de la ejecución y rutas de artefactos.
+   - Mantener un registro estructurado por fase y un log bruto para auditoría.
+   - Extender el modelo actual de [autodev_cli/history_manager.py](/home/developer/repos/hector/autodev/autodev_cli/history_manager.py#L13) para incluir rama, estado y rutas de archivos.
+
+3. Implementar recuperación automática de sesión por rama.
+   - Detectar la rama actual antes de arrancar el flujo.
+   - Buscar una sesión activa previa para la combinación `project_path + branch` y reutilizar su `session_id`.
+   - Si existe sesión activa, continuar escribiendo en la misma trazabilidad y en los mismos artefactos.
+   - Si no existe, crear una sesión nueva y asociarla a la rama recién creada.
+   - Definir qué significa “activa” frente a “cerrada” para evitar reanudar una ejecución ya finalizada.
+
+4. Generar resumen Markdown y HTML al final de cada ejecución.
+   - Producir un `summary.md` con el resumen técnico final y un `summary.html` renderizado desde ese Markdown.
+   - Incluir en el HTML el identificador de sesión, rama, agente, rutas de artefactos y resultado final.
+   - Abrir automáticamente el HTML en el navegador por defecto al finalizar.
+   - Si falla la apertura automática, dejar el archivo accesible y reportar la ruta exacta.
+
+5. Ajustar la capa Git y el CLI para reflejar la nueva trazabilidad.
+   - En [autodev_cli/git_manager.py](/home/developer/repos/hector/autodev/autodev_cli/git_manager.py#L3) añadir utilidades para leer rama actual, `HEAD` y, si hace falta, hash de commit.
+   - En [autodev_cli/cli.py](/home/developer/repos/hector/autodev/autodev_cli/cli.py#L29) mostrar sesión y rama en el comando `history`.
+   - Mantener el comportamiento actual de `-dev`, pero hacer que la recuperación sea automática cuando proceda.
+   - Opcionalmente, exponer un flag explícito de reanudación solo si luego se ve que ayuda a controlar casos ambiguos.
+
+6. Actualizar documentación y pruebas.
+   - Revisar [README.md](/home/developer/repos/hector/autodev/README.md#L40) y [ARCHITECTURE.md](/home/developer/repos/hector/autodev/ARCHITECTURE.md#L39) para explicar la nueva carpeta de datos, la recuperación de sesión y los nuevos artefactos.
+   - Extender [tests/test_orchestrator.py](/home/developer/repos/hector/autodev/tests/test_orchestrator.py#L6) para cubrir persistencia, reanudación por rama y generación del HTML.
+   - Añadir pruebas específicas para el gestor de historial y para el renderizado de resumen.
+   - Revisar [tests/test_cli.py](/home/developer/repos/hector/autodev/tests/test_cli.py#L16) para validar que `history` expone la nueva información.
+   - Revisar [tests/test_git_manager.py](/home/developer/repos/hector/autodev/tests/test_git_manager.py#L9) si se amplían utilidades de rama.
+   - Revisar [tests/test_ai_clients.py](/home/developer/repos/hector/autodev/tests/test_ai_clients.py#L16) si cambian las garantías de logging o sesión.
+
+**Archivos y módulos que probablemente tocaría**
+
+- [autodev_cli/developer_orchestrator.py](/home/developer/repos/hector/autodev/autodev_cli/developer_orchestrator.py#L12)
+- [autodev_cli/history_manager.py](/home/developer/repos/hector/autodev/autodev_cli/history_manager.py#L6)
+- [autodev_cli/cli.py](/home/developer/repos/hector/autodev/autodev_cli/cli.py#L9)
+- [autodev_cli/git_manager.py](/home/developer/repos/hector/autodev/autodev_cli/git_manager.py#L3)
+- [autodev_cli/codex_client.py](/home/developer/repos/hector/autodev/autodev_cli/codex_client.py#L1)
+- [autodev_cli/gemini_client.py](/home/developer/repos/hector/autodev/autodev_cli/gemini_client.py#L1)
+- Nuevo módulo para almacenamiento/configuración de rutas de datos, por ejemplo `autodev_cli/storage.py` o `autodev_cli/session_store.py`
+- Nuevo módulo para generar HTML, por ejemplo `autodev_cli/report_renderer.py`
+- [tests/test_orchestrator.py](/home/developer/repos/hector/autodev/tests/test_orchestrator.py#L6)
+- [tests/test_cli.py](/home/developer/repos/hector/autodev/tests/test_cli.py#L1)
+- [tests/test_ai_clients.py](/home/developer/repos/hector/autodev/tests/test_ai_clients.py#L1)
+- [tests/test_git_manager.py](/home/developer/repos/hector/autodev/tests/test_git_manager.py#L1)
+- Nuevo `tests/test_history_manager.py`
+- Nuevo `tests/test_report_renderer.py` o equivalente
+
+**Criterios de aceptación**
+
+- Cada ejecución guarda todos los prompts y respuestas de las fases en la carpeta de datos del usuario.
+- Cada ejecución guarda `session_id`, rama Git, `project_path`, agente, timestamps y estado.
+- Si el comando se lanza otra vez en la misma rama y existe una sesión activa compatible, se reutiliza esa sesión.
+- Si no hay sesión recuperable, se crea una nueva.
+- Al finalizar, existen `summary.md` y `summary.html` en la carpeta de datos.
+- El HTML se abre automáticamente en el navegador.
+- `history` permite ver sesiones con su rama y enlaces/rutas a artefactos.
+- La suite de pruebas pasa sin romper el comportamiento existente.
+- Si se mantiene compatibilidad con la base actual, la migración de SQLite no rompe sesiones ya guardadas.
+
+**Riesgos principales**
+
+- Migración de esquema SQLite: hoy [history_manager.py](/home/developer/repos/hector/autodev/autodev_cli/history_manager.py#L13) no guarda rama ni estado, así que habrá que migrar datos o aceptar una rotura controlada.
+- Ambigüedad en la reanudación: si hay varias sesiones previas para la misma rama, hay que definir una única regla de selección.
+- Portabilidad de la carpeta de datos: conviene fijar una ruta estándar y documentarla; si no, puede variar entre entornos.
+- Apertura del navegador: puede fallar en entornos headless o remotos.
+- Riesgo de persistir información sensible: al guardar todos los inputs/outputs hay que asumir que pueden aparecer secretos en prompts o salidas.
+- Diferencia entre el contexto pedido y el actual del repo: el proyecto está montado con `pytest`, no con `unittest`, así que si quieres que las nuevas pruebas sean estrictamente `unittest`, hay que ajustarlo explícitamente.
+
+Si quieres, el siguiente paso puede ser que te devuelva este plan convertido en un backlog técnico más detallado, con tareas numeradas, dependencias y orden de implementación.
+
+[2026-04-09T18:20:30.495643] --- END RESPONSE ---
+
+[2026-04-09T18:20:30.504743] --- NEW PROMPT (Codex) ---
+[2026-04-09T18:20:30.504971] Input Prompt: Implementa la funcionalidad solicitada siguiendo el plan anterior.
+Instrucciones del usuario: quiero que almacene todos los inputs y outputs, que al final pida un resumen en .md y almacene todo en una carpeta local en la home del ususario, tipica carpeta de datos. Al acaba debe generar un html de resumen, en la carpeta de datos y abrirlo en el navegador. debe guardar la rama y el id de ssion de cada ejecucion. si se lanza en una rama que est detectada y tenemos session, debe recuperar la session.
+Stack detectado: python con unittest.
+Puedes modificar codigo de aplicacion, tests y documentacion si es necesario.
+Mantén los cambios enfocados, coherentes con el estilo existente y explica brevemente los archivos alterados.
+[2026-04-09T18:20:30.505194] Executing Command: codex --yolo exec resume --last Implementa la funcionalidad solicitada siguiendo el plan anterior.
+Instrucciones del usuario: quiero que almacene todos los inputs y outputs, que al final pida un resumen en .md y almacene todo en una carpeta local en la home del ususario, tipica carpeta de datos. Al acaba debe generar un html de resumen, en la carpeta de datos y abrirlo en el navegador. debe guardar la rama y el id de ssion de cada ejecucion. si se lanza en una rama que est detectada y tenemos session, debe recuperar la session.
+Stack detectado: python con unittest.
+Puedes modificar codigo de aplicacion, tests y documentacion si es necesario.
+Mantén los cambios enfocados, coherentes con el estilo existente y explica brevemente los archivos alterados.
+[2026-04-09T18:25:35.714394] Output Response:
+Implementado el flujo de persistencia y reanudación.
+
+- La carpeta de datos pasó a ser `XDG_DATA_HOME/autodev` con fallback a `~/.local/share/autodev`.
+- Cada ejecución ahora guarda `session.json`, `execution.log`, `summary.md`, `summary.html`, `final_report.md`, y los inputs/outputs de cada fase dentro de `sessions/<session_id>/`.
+- El historial SQLite ahora guarda rama, estado, `agent_session_id`, rutas de artefactos y `head_sha`.
+- Si se relanza en una rama `autodev/*` con sesión `running`, el orquestador recupera esa sesión y continúa desde el siguiente paso.
+- Al finalizar, se genera el HTML del resumen y se intenta abrir en el navegador; si no se puede, se deja la ruta impresa.
+- `history` ahora muestra rama, estado y rutas de resumen.
+- La documentación de [README.md](/home/developer/repos/hector/autodev/README.md) y [ARCHITECTURE.md](/home/developer/repos/hector/autodev/ARCHITECTURE.md) ya refleja la nueva trazabilidad.
+
+Archivos tocados:
+- [autodev_cli/developer_orchestrator.py](/home/developer/repos/hector/autodev/autodev_cli/developer_orchestrator.py)
+- [autodev_cli/history_manager.py](/home/developer/repos/hector/autodev/autodev_cli/history_manager.py)
+- [autodev_cli/git_manager.py](/home/developer/repos/hector/autodev/autodev_cli/git_manager.py)
+- [autodev_cli/cli.py](/home/developer/repos/hector/autodev/autodev_cli/cli.py)
+- [autodev_cli/runtime_store.py](/home/developer/repos/hector/autodev/autodev_cli/runtime_store.py)
+- [autodev_cli/reporting.py](/home/developer/repos/hector/autodev/autodev_cli/reporting.py)
+- [tests/test_orchestrator.py](/home/developer/repos/hector/autodev/tests/test_orchestrator.py)
+- [tests/test_history_manager.py](/home/developer/repos/hector/autodev/tests/test_history_manager.py)
+- [README.md](/home/developer/repos/hector/autodev/README.md)
+- [ARCHITECTURE.md](/home/developer/repos/hector/autodev/ARCHITECTURE.md)
+
+Validación:
+- `python -m pytest tests`
+- Resultado: `26 passed`
+
+Si quieres, el siguiente paso natural es que añada una opción de CLI para listar y reabrir sesiones por rama de forma explícita.
+
+[2026-04-09T18:25:35.714725] --- END RESPONSE ---
+
+[2026-04-09T18:25:35.721000] --- NEW PROMPT (Codex) ---
+[2026-04-09T18:25:35.721220] Input Prompt: Ejecuta la estrategia de pruebas para verificar la implementacion.
+Usa el test runner detectado: unittest.
+Primero valida los cambios relevantes de forma focalizada y despues ejecuta la suite necesaria para detectar regresiones.
+Si encuentras fallos, corrige el codigo o las pruebas hasta dejar la funcionalidad estable.
+[2026-04-09T18:25:35.721351] Executing Command: codex --yolo exec resume --last Ejecuta la estrategia de pruebas para verificar la implementacion.
+Usa el test runner detectado: unittest.
+Primero valida los cambios relevantes de forma focalizada y despues ejecuta la suite necesaria para detectar regresiones.
+Si encuentras fallos, corrige el codigo o las pruebas hasta dejar la funcionalidad estable.
+[2026-04-09T18:25:59.734064] Output Response:
+`python -m unittest discover -s tests -p 'test_*.py'` no ejecutó pruebas: la suite actual está escrita en estilo `pytest` con fixtures, así que `unittest` descubrió `0 tests`.
+
+Para validar de verdad la implementación, ejecuté la suite efectiva del repositorio:
+
+- `python -m pytest tests`
+- Resultado: `26 passed`
+
+No he encontrado fallos de aplicación que requirieran corrección. El único problema es el runner: si quieres que `unittest` ejecute pruebas reales aquí, hay que migrar o duplicar la suite a `unittest.TestCase`.
+
+[2026-04-09T18:25:59.734216] --- END RESPONSE ---
+
+[2026-04-09T18:25:59.743486] --- NEW PROMPT (Codex) ---
+[2026-04-09T18:25:59.743629] Input Prompt: Valida el resultado final y entrega un informe tecnico en Markdown.
+Instrucciones originales: quiero que almacene todos los inputs y outputs, que al final pida un resumen en .md y almacene todo en una carpeta local en la home del ususario, tipica carpeta de datos. Al acaba debe generar un html de resumen, en la carpeta de datos y abrirlo en el navegador. debe guardar la rama y el id de ssion de cada ejecucion. si se lanza en una rama que est detectada y tenemos session, debe recuperar la session.
+Incluye: resumen de lo desarrollado, archivos modificados, pruebas ejecutadas, resultado de validacion y riesgos residuales.
+Cierra indicando de forma explicita si la funcionalidad cumple los requisitos.
+[2026-04-09T18:25:59.743708] Executing Command: codex --yolo exec resume --last Valida el resultado final y entrega un informe tecnico en Markdown.
+Instrucciones originales: quiero que almacene todos los inputs y outputs, que al final pida un resumen en .md y almacene todo en una carpeta local en la home del ususario, tipica carpeta de datos. Al acaba debe generar un html de resumen, en la carpeta de datos y abrirlo en el navegador. debe guardar la rama y el id de ssion de cada ejecucion. si se lanza en una rama que est detectada y tenemos session, debe recuperar la session.
+Incluye: resumen de lo desarrollado, archivos modificados, pruebas ejecutadas, resultado de validacion y riesgos residuales.
+Cierra indicando de forma explicita si la funcionalidad cumple los requisitos.
+[2026-04-09T18:26:13.312653] Output Response:
+# Informe Técnico de Validación
+
+## Resumen de lo desarrollado
+
+Se implementó la trazabilidad completa de ejecuciones de `autodev` en una carpeta de datos local del usuario, con persistencia de:
+
+- `session_id` de cada ejecución.
+- Rama Git asociada.
+- Inputs y outputs de cada fase.
+- Log de ejecución.
+- Resumen final en Markdown.
+- Resumen final en HTML.
+- Metadatos de sesión para recuperación y auditoría.
+
+Además:
+
+- Se movió el almacenamiento canónico a `XDG_DATA_HOME/autodev` con fallback a `~/.local/share/autodev`.
+- Se añadió recuperación automática de sesión cuando se relanza sobre una rama `autodev/*` con sesión `running`.
+- Se genera `summary.html` al final y se abre en el navegador.
+- Se amplió el comando `history` para mostrar rama, estado y rutas de artefactos.
+- Se actualizó la documentación del proyecto para reflejar la nueva arquitectura de persistencia.
+
+## Archivos modificados
+
+- [autodev_cli/developer_orchestrator.py](/home/developer/repos/hector/autodev/autodev_cli/developer_orchestrator.py)
+- [autodev_cli/history_manager.py](/home/developer/repos/hector/autodev/autodev_cli/history_manager.py)
+- [autodev_cli/git_manager.py](/home/developer/repos/hector/autodev/autodev_cli/git_manager.py)
+- [autodev_cli/cli.py](/home/developer/repos/hector/autodev/autodev_cli/cli.py)
+- [autodev_cli/runtime_store.py](/home/developer/repos/hector/autodev/autodev_cli/runtime_store.py)
+- [autodev_cli/reporting.py](/home/developer/repos/hector/autodev/autodev_cli/reporting.py)
+- [tests/test_orchestrator.py](/home/developer/repos/hector/autodev/tests/test_orchestrator.py)
+- [tests/test_history_manager.py](/home/developer/repos/hector/autodev/tests/test_history_manager.py)
+- [README.md](/home/developer/repos/hector/autodev/README.md)
+- [ARCHITECTURE.md](/home/developer/repos/hector/autodev/ARCHITECTURE.md)
+
+## Pruebas ejecutadas
+
+- `python -m unittest discover -s tests -p 'test_*.py'`
+- Resultado: `Ran 0 tests`
+
+- `python -m pytest tests`
+- Resultado: `26 passed`
+
+## Resultado de validación
+
+La implementación funciona correctamente bajo la suite real del repositorio.
+
+Validaciones confirmadas:
+
+- Persistencia de sesiones y pasos.
+- Escritura de `summary.md` y `summary.html`.
+- Apertura del HTML de resumen.
+- Recuperación de sesión por rama `autodev/*`.
+- Registro de rama, `session_id` y metadatos.
+- Actualización del comando `history`.
+
+La única discrepancia detectada es de runner: el repo sigue usando tests estilo `pytest`, por lo que `unittest discover` no ejecuta casos reales.
+
+## Riesgos residuales
+
+- La suite del repositorio sigue siendo `pytest`-style; si se exige ejecución real con `unittest`, habrá que migrar o duplicar los tests a `unittest.TestCase`.
+- La apertura automática del HTML puede fallar en entornos headless o sin navegador disponible; en ese caso, la ruta queda registrada.
+- La persistencia completa de inputs/outputs implica potencial captura de información sensible si el usuario la introduce en prompts o respuestas.
+- La recuperación automática por rama depende de que la sesión previa siga marcada como `running`; si se interrumpe sin cerrar estado, el comportamiento depende del registro en SQLite.
+
+## Conclusión
+
+Sí, la funcionalidad cumple los requisitos principales solicitados: almacenamiento de inputs/outputs, resumen Markdown, HTML final en la carpeta de datos del usuario, apertura en navegador, guardado de rama y `session_id`, y recuperación de sesión en ramas detectadas con sesión activa.
+
+[2026-04-09T18:26:13.312908] --- END RESPONSE ---
+

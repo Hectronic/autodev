@@ -94,3 +94,15 @@ def test_codex_log_creation(codex_client, tmp_path):
         content = log_file.read_text()
         assert "Input Prompt: test prompt" in content
         assert "--- NEW PROMPT (Codex) ---" in content
+
+
+def test_codex_log_creation_in_missing_parent_directory(tmp_path):
+    log_file = tmp_path / "nested" / "logs" / "execution.log"
+    client = CodexClient(str(tmp_path), str(log_file))
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        client.run_prompt("test prompt")
+
+    assert log_file.exists()
+    assert "Input Prompt: test prompt" in log_file.read_text()

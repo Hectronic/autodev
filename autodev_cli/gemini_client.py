@@ -1,14 +1,20 @@
-import subprocess
-import re
 import datetime
+import os
+import re
+import subprocess
 
 class GeminiClient:
     def __init__(self, project_path, log_file):
         self.project_path = project_path
         self.log_file = log_file
         self.session_id = None
+        self._ensure_log_directory()
+
+    def _ensure_log_directory(self):
+        os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
 
     def _log(self, message):
+        self._ensure_log_directory()
         timestamp = datetime.datetime.now().isoformat()
         with open(self.log_file, "a") as f:
             f.write(f"[{timestamp}] {message}\n")
