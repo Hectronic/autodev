@@ -40,16 +40,28 @@ class AutoDevOrchestrator:
         self.changed_files = []
         self.commit_summary = None
         self.diff_patch = None
+        self.pending_status_lines = []
+        self.pending_staged_files = []
+        self.pending_unstaged_files = []
+        self.pending_untracked_files = []
+        self.pending_staged_diff_stat = ""
+        self.pending_unstaged_diff_stat = ""
+        self.pending_staged_diff_name_status = ""
+        self.pending_unstaged_diff_name_status = ""
+        self.pending_staged_diff_patch = ""
+        self.pending_unstaged_diff_patch = ""
         self.workflow_name = "development"
         self.resume_mode = False
         self.session_dir = None
         self.summary_md_path = None
         self.summary_html_path = None
+        self.reference_docs = []
+        self.reference_docs_context = ""
 
-    def run(self, instructions, no_commit=False):
+    def run(self, instructions, push=False):
         instructions = (instructions or "").strip()
         if not instructions:
-            print("ERROR: Debes proporcionar instrucciones de desarrollo con --instructions.")
+            print("ERROR: Debes proporcionar instrucciones de desarrollo como argumento de -dev.")
             return
 
         session_status = "completed"
@@ -105,6 +117,7 @@ class AutoDevOrchestrator:
                     agent_session_id=self._get_agent_session_id(),
                     head_sha=self.git.get_head_sha(),
                 )
+                self._load_reference_docs_into_session()
                 print(f"--- Nueva sesion {self.session_id} creada en la rama {self.branch_name} ---")
 
             self._prepare_session_artifacts()
@@ -139,6 +152,10 @@ class AutoDevOrchestrator:
                 (
                     "--- Development phase ---",
                     self._build_develop_prompt(instructions),
+                ),
+                (
+                    "--- Documentation phase ---",
+                    self._build_documentation_prompt(instructions),
                 ),
                 (
                     "--- Testing phase ---",
@@ -227,14 +244,12 @@ class AutoDevOrchestrator:
             print(final_markdown)
             print("=" * 40 + "\n")
 
-            if not no_commit:
-                commit_message = f"autodev: {self._shorten_commit_message(instructions)}"
-                self.git.commit_changes(commit_message)
-                print(f"Development flow finished for branch {self.branch_name}")
-            else:
-                print(
-                    f"Development flow finished. Changes are ready for review in branch {self.branch_name} (NO COMMIT MADE)."
-                )
+            commit_message = f"autodev: {self._shorten_commit_message(instructions)}"
+            self._finalize_branch_changes(
+                commit_message=commit_message,
+                push=push,
+                workflow_label="Development flow",
+            )
 
             print(f"Session ID: {self.session_id}")
             print(f"Branch: {self.branch_name}")
@@ -245,7 +260,7 @@ class AutoDevOrchestrator:
         finally:
             self._finalize_session(session_status)
 
-    def run_unit_test(self, base_branch=None, instructions=None, no_commit=False):
+    def run_unit_test(self, base_branch=None, instructions=None, push=False):
         extra_instructions = (instructions or "").strip()
         session_status = "completed"
 
@@ -292,6 +307,16 @@ class AutoDevOrchestrator:
                 current_branch,
                 paths=self.changed_files,
             )
+            self.pending_status_lines = self.git.get_status_porcelain()
+            self.pending_staged_files = self.git.get_staged_changed_files()
+            self.pending_unstaged_files = self.git.get_unstaged_changed_files()
+            self.pending_untracked_files = self.git.get_untracked_files()
+            self.pending_staged_diff_stat = self.git.get_staged_diff_stat()
+            self.pending_unstaged_diff_stat = self.git.get_unstaged_diff_stat()
+            self.pending_staged_diff_name_status = self.git.get_staged_diff_name_status()
+            self.pending_unstaged_diff_name_status = self.git.get_unstaged_diff_name_status()
+            self.pending_staged_diff_patch = self.git.get_staged_diff_patch(paths=self.pending_staged_files)
+            self.pending_unstaged_diff_patch = self.git.get_unstaged_diff_patch(paths=self.pending_unstaged_files)
 
             resume_session = self.history.get_running_session_for_branch(
                 self.project_path,
@@ -453,14 +478,12 @@ class AutoDevOrchestrator:
             print(final_markdown)
             print("=" * 40 + "\n")
 
-            if not no_commit:
-                commit_message = f"autodev-ut: {self._shorten_commit_message(self.base_branch_name or self.branch_name)}"
-                self.git.commit_changes(commit_message)
-                print(f"Unit test review finished for branch {self.branch_name}")
-            else:
-                print(
-                    f"Unit test review finished. Changes are ready for review in branch {self.branch_name} (NO COMMIT MADE)."
-                )
+            commit_message = f"autodev-ut: {self._shorten_commit_message(self.base_branch_name or self.branch_name)}"
+            self._finalize_branch_changes(
+                commit_message=commit_message,
+                push=push,
+                workflow_label="Unit test review",
+            )
 
             print(f"Session ID: {self.session_id}")
             print(f"Branch: {self.branch_name}")
@@ -476,6 +499,7 @@ class AutoDevOrchestrator:
         return (
             "Actua como un desarrollador senior y planificador tecnico.\n"
             f"Contexto del proyecto: {self.project_info['project_type']} usando {self.project_info['test_runner']}.\n"
+            f"{self._build_reference_docs_context()}\n"
             f"Instrucciones del usuario: {instructions}\n"
             "PASO 1: Analiza el repositorio y redacta un plan de trabajo ordenado por prioridades.\n"
             "PASO 2: Identifica archivos, modulos y pruebas que probablemente deban tocarse.\n"
@@ -486,15 +510,29 @@ class AutoDevOrchestrator:
     def _build_develop_prompt(self, instructions):
         return (
             "Implementa la funcionalidad solicitada siguiendo el plan anterior.\n"
+            f"{self._build_reference_docs_context()}\n"
             f"Instrucciones del usuario: {instructions}\n"
             f"Stack detectado: {self.project_info['project_type']} con {self.project_info['test_runner']}.\n"
             "Puedes modificar codigo de aplicacion, tests y documentacion si es necesario.\n"
             "Mantén los cambios enfocados, coherentes con el estilo existente y explica brevemente los archivos alterados."
         )
 
+    def _build_documentation_prompt(self, instructions):
+        return (
+            "Documenta los cambios realizados y actualiza la documentacion existente del repositorio.\n"
+            f"{self._build_reference_docs_context()}\n"
+            f"Instrucciones del usuario: {instructions}\n"
+            "Tareas:\n"
+            "1. Revisa la documentacion cargada de la sesion y actualiza README, GEMINI, AGENTS o cualquier doc relevante que hayas encontrado.\n"
+            "2. Añade o corrige secciones que describan el cambio, uso, configuracion o limitaciones.\n"
+            "3. Si no existe documentacion util, crea la minima necesaria para reflejar el comportamiento nuevo.\n"
+            "4. Explica brevemente que archivos de documentacion cambiaste y por que."
+        )
+
     def _build_test_prompt(self):
         return (
             "Ejecuta la estrategia de pruebas para verificar la implementacion.\n"
+            f"{self._build_reference_docs_context()}\n"
             f"Usa el test runner detectado: {self.project_info['test_runner']}.\n"
             "Primero valida los cambios relevantes de forma focalizada y despues ejecuta la suite necesaria para detectar regresiones.\n"
             "Si encuentras fallos, corrige el codigo o las pruebas hasta dejar la funcionalidad estable."
@@ -503,9 +541,21 @@ class AutoDevOrchestrator:
     def _build_validation_prompt(self, instructions):
         return (
             "Valida el resultado final y entrega un informe tecnico en Markdown.\n"
+            f"{self._build_reference_docs_context()}\n"
             f"Instrucciones originales: {instructions}\n"
             "Incluye: resumen de lo desarrollado, archivos modificados, pruebas ejecutadas, resultado de validacion y riesgos residuales.\n"
             "Cierra indicando de forma explicita si la funcionalidad cumple los requisitos."
+        )
+
+    def _finalize_branch_changes(self, commit_message, push, workflow_label):
+        if push:
+            self.git.commit_changes(commit_message)
+            self.git.push_branch(self.branch_name)
+            print(f"{workflow_label} finished for branch {self.branch_name} (commit and push made).")
+            return
+
+        print(
+            f"{workflow_label} finished. Changes are ready for review in branch {self.branch_name} (NO COMMIT MADE, NO PUSH MADE)."
         )
 
     def _build_unit_test_context(self, instructions):
@@ -527,6 +577,18 @@ class AutoDevOrchestrator:
         if self.commit_summary:
             context_lines.append("Resumen de commits:")
             context_lines.append(self.commit_summary)
+        if self.pending_status_lines:
+            context_lines.append("Cambios pendientes en working tree:")
+            context_lines.extend(self.pending_status_lines)
+        if self.pending_untracked_files:
+            context_lines.append("Archivos no trackeados:")
+            context_lines.extend(f"- {path}" for path in self.pending_untracked_files)
+        if self.pending_staged_files:
+            context_lines.append("Archivos staged:")
+            context_lines.extend(f"- {path}" for path in self.pending_staged_files)
+        if self.pending_unstaged_files:
+            context_lines.append("Archivos unstaged:")
+            context_lines.extend(f"- {path}" for path in self.pending_unstaged_files)
         if instructions:
             context_lines.append(f"Indicaciones adicionales: {instructions}")
         return "\n".join(context_lines)
@@ -620,6 +682,7 @@ class AutoDevOrchestrator:
             self.summary_md_path = session_row["summary_md_path"]
         if session_row.get("summary_html_path"):
             self.summary_html_path = session_row["summary_html_path"]
+        self._restore_reference_docs_from_session()
         self._sync_client_log_file()
         if hasattr(self.ai, "has_started"):
             self.ai.has_started = True
@@ -664,7 +727,11 @@ class AutoDevOrchestrator:
             f"- Project path: {self.project_path}\n"
             f"- Instructions: {instructions}\n\n"
             "## Cambios detectados\n\n"
-            f"{self.diff_stat or 'Sin diff disponible'}\n\n"
+            f"{self._render_markdown_block(self.diff_stat, language='text') if self.diff_stat else 'Sin diff disponible'}\n\n"
+            "## Diff de la rama\n\n"
+            f"{self._render_markdown_block(self.diff_patch, language='diff') if self.diff_patch else 'Sin diff disponible'}\n\n"
+            "## Cambios pendientes\n\n"
+            f"{self._render_pending_changes_section()}\n\n"
             "## Archivos revisados\n\n"
             f"{chr(10).join(f'- {path}' for path in self.changed_files) if self.changed_files else '- Sin archivos cambiados'}\n\n"
             "## Pasos registrados\n\n"
@@ -689,6 +756,7 @@ class AutoDevOrchestrator:
             "summary_html_path": self.summary_html_path,
             "agent_session_id": self._get_agent_session_id(),
             "head_sha": self.git.get_head_sha(),
+            "reference_docs": [doc["name"] for doc in self.reference_docs],
         }
         self.storage.write_json(self.storage.session_file(self.session_id, "session.json"), payload)
 
@@ -713,3 +781,122 @@ class AutoDevOrchestrator:
             self._write_session_manifest(status=status)
         except Exception as exc:
             print(f"WARNING: No se pudo finalizar la sesion {self.session_id}: {exc}")
+
+    def _reference_doc_candidates(self):
+        return [
+            "README.md",
+            "README",
+            "GEMINI.md",
+            "gemini.md",
+            "AGENTS.md",
+            "agents.md",
+        ]
+
+    def _load_reference_docs_into_session(self):
+        self.reference_docs = []
+        self.reference_docs_context = ""
+
+        blocks = []
+        for filename in self._reference_doc_candidates():
+            source_path = os.path.join(self.project_path, filename)
+            if not os.path.isfile(source_path):
+                continue
+
+            try:
+                with open(source_path, "r", encoding="utf-8") as handle:
+                    content = handle.read()
+            except OSError as exc:
+                print(f"WARNING: No se pudo leer {source_path}: {exc}")
+                continue
+
+            session_path = self.storage.session_file(self.session_id, f"reference_docs/{filename}")
+            self.storage.write_text(session_path, content)
+            self.reference_docs.append(
+                {
+                    "name": filename,
+                    "source_path": source_path,
+                    "session_path": str(session_path),
+                }
+            )
+            blocks.append(f"## {filename}\n{content}")
+
+        self.reference_docs_context = "\n\n".join(blocks)
+        if self.reference_docs:
+            self.history.update_session(
+                self.session_id,
+                status="running",
+            )
+
+    def _restore_reference_docs_from_session(self):
+        self.reference_docs = []
+        self.reference_docs_context = ""
+
+        session_reference_dir = self.storage.session_file(self.session_id, "reference_docs")
+        if not session_reference_dir.exists():
+            return
+
+        blocks = []
+        for filename in self._reference_doc_candidates():
+            session_path = session_reference_dir / filename
+            if not session_path.exists():
+                continue
+            try:
+                content = session_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+
+            self.reference_docs.append(
+                {
+                    "name": filename,
+                    "source_path": os.path.join(self.project_path, filename),
+                    "session_path": str(session_path),
+                }
+            )
+            blocks.append(f"## {filename}\n{content}")
+
+        self.reference_docs_context = "\n\n".join(blocks)
+
+    def _build_reference_docs_context(self):
+        if not self.reference_docs_context:
+            return "Documentacion de referencia cargada: ninguna."
+        return "Documentacion de referencia cargada en la sesion:\n" + self.reference_docs_context
+
+    def _render_markdown_block(self, content, language=""):
+        content = (content or "").strip()
+        if not content:
+            return ""
+        fence = f"```{language}".rstrip()
+        return f"{fence}\n{content}\n```"
+
+    def _render_pending_changes_section(self):
+        sections = []
+        if self.pending_status_lines:
+            sections.append("### Estado\n" + self._render_markdown_block("\n".join(self.pending_status_lines), language="text"))
+        if self.pending_staged_diff_stat:
+            sections.append("### Staged stat\n" + self._render_markdown_block(self.pending_staged_diff_stat, language="text"))
+        if self.pending_staged_diff_name_status:
+            sections.append(
+                "### Staged name-status\n"
+                + self._render_markdown_block(self.pending_staged_diff_name_status, language="text")
+            )
+        if self.pending_staged_diff_patch:
+            sections.append("### Staged diff\n" + self._render_markdown_block(self.pending_staged_diff_patch, language="diff"))
+        if self.pending_unstaged_diff_stat:
+            sections.append("### Unstaged stat\n" + self._render_markdown_block(self.pending_unstaged_diff_stat, language="text"))
+        if self.pending_unstaged_diff_name_status:
+            sections.append(
+                "### Unstaged name-status\n"
+                + self._render_markdown_block(self.pending_unstaged_diff_name_status, language="text")
+            )
+        if self.pending_unstaged_diff_patch:
+            sections.append(
+                "### Unstaged diff\n" + self._render_markdown_block(self.pending_unstaged_diff_patch, language="diff")
+            )
+        if self.pending_untracked_files:
+            sections.append(
+                "### Untracked\n"
+                + self._render_markdown_block("\n".join(f"- {path}" for path in self.pending_untracked_files), language="text")
+            )
+        if not sections:
+            return "Sin cambios pendientes."
+        return "\n\n".join(sections)

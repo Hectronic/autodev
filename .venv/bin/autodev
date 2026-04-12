@@ -1,6 +1,0 @@
-#!/home/developer/repos/hector/autodev/.venv/bin/python
-import sys
-from autodev_cli.cli import cli
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(cli())

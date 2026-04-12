@@ -2,6 +2,7 @@ import click
 import os
 
 from .developer_orchestrator import AutoDevOrchestrator
+from .git_manager import GitManager
 from .history_manager import HistoryManager
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'], ignore_unknown_options=True)
@@ -35,34 +36,50 @@ def _render_sessions_list(manager, limit):
 
 @click.command(name="-dev", short_help="Desarrolla una funcionalidad a partir de instrucciones.")
 @click.option('--path', '-p', type=click.Path(exists=True, file_okay=False, dir_okay=True), default=None, help="Ruta del proyecto a modificar. Por defecto, el directorio actual.")
-@click.option('--instructions', '-i', required=True, help="Instrucciones sobre qué desarrollar.")
+@click.argument('instructions')
 @click.option('--agent', '-a', default='codex', type=click.Choice(['gemini', 'codex'], case_sensitive=False), help="Agente de IA a utilizar.")
-@click.option('--no-commit', is_flag=True, default=False, help="No realiza commit de los cambios al finalizar, los deja preparados para revisión.")
-def dev_command(path, instructions, agent, no_commit):
+@click.option('--push', is_flag=True, default=False, help="Hace commit y push de la rama creada al finalizar.")
+def dev_command(path, instructions, agent, push):
     """Ejecuta el flujo completo de desarrollo sobre el proyecto indicado."""
     project_path = path if path else os.getcwd()
     orchestrator = AutoDevOrchestrator(project_path, agent=agent)
-    if no_commit:
-        orchestrator.run(instructions=instructions, no_commit=True)
-    else:
-        orchestrator.run(instructions=instructions)
+    orchestrator.run(instructions=instructions, push=push)
 
 
 @click.command(name="-ut", short_help="Revisa cobertura de cambios en una rama frente a su base.")
 @click.option('--path', '-p', type=click.Path(exists=True, file_okay=False, dir_okay=True), default=None, help="Ruta del proyecto a revisar. Por defecto, el directorio actual.")
 @click.option('--base-branch', '-b', default=None, help="Rama base contra la que comparar. Si no se indica, se detecta la upstream o la rama remota por defecto.")
-@click.option('--instructions', '-i', default="", help="Contexto adicional para enfocar la revisión de cobertura.")
 @click.option('--agent', '-a', default='codex', type=click.Choice(['gemini', 'codex'], case_sensitive=False), help="Agente de IA a utilizar.")
-@click.option('--no-commit', is_flag=True, default=False, help="No realiza commit de los cambios al finalizar, los deja preparados para revisión.")
-def unit_test_command(path, base_branch, instructions, agent, no_commit):
+@click.option('--push', is_flag=True, default=False, help="Hace commit y push de la rama al finalizar la revisión.")
+def unit_test_command(path, base_branch, agent, push):
     """Revisa la cobertura de una rama respecto a su rama base y remedia gaps detectados."""
     project_path = path if path else os.getcwd()
     orchestrator = AutoDevOrchestrator(project_path, agent=agent)
     orchestrator.run_unit_test(
         base_branch=base_branch,
-        instructions=instructions,
-        no_commit=no_commit,
+        push=push,
     )
+
+
+@click.command(name="push", short_help="Genera un commit a partir de los cambios y empuja la rama actual.")
+@click.option('--path', '-p', type=click.Path(exists=True, file_okay=False, dir_okay=True), default=None, help="Ruta del proyecto. Por defecto, el directorio actual.")
+def push_command(path):
+    """Genera un mensaje de commit a partir de los cambios locales, hace commit y push."""
+    project_path = path if path else os.getcwd()
+    git = GitManager(project_path)
+
+    if not git.is_git_repo():
+        click.echo(f"ERROR: {project_path} no es un repositorio Git válido.")
+        return
+
+    current_branch = git.get_current_branch()
+    if not current_branch:
+        click.echo("ERROR: No se pudo determinar la rama actual.")
+        return
+
+    message = git.commit_and_push_generated_changes()
+    if message:
+        click.echo(f"Push completado en {current_branch} con commit: {message}")
 
 
 @click.command(name="history", short_help="Muestra las 10 últimas sesiones.")
@@ -102,6 +119,7 @@ def history_command(limit, session_id):
 cli.add_command(dev_command)
 cli.add_command(unit_test_command)
 cli.add_command(unit_test_command, name="unit-test")
+cli.add_command(push_command)
 cli.add_command(history_command)
 
 if __name__ == "__main__":
