@@ -61,6 +61,16 @@ def unit_test_command(path, base_branch, agent, push):
     )
 
 
+@click.command(name="-e", short_help="Analiza el repositorio y genera un informe tecnico completo.")
+@click.option('--path', '-p', type=click.Path(exists=True, file_okay=False, dir_okay=True), default=None, help="Ruta del proyecto a analizar. Por defecto, el directorio actual.")
+@click.option('--agent', '-a', default='codex', type=click.Choice(['gemini', 'codex'], case_sensitive=False), help="Agente a usar para mantener la coherencia de sesion.")
+def explain_command(path, agent):
+    """Revisa arquitectura, stack, diseno, funcionalidad y tests del repositorio y produce un reporte standalone."""
+    project_path = path if path else os.getcwd()
+    orchestrator = AutoDevOrchestrator(project_path, agent=agent)
+    orchestrator.run_explain()
+
+
 @click.command(name="push", short_help="Genera un commit a partir de los cambios y empuja la rama actual.")
 @click.option('--path', '-p', type=click.Path(exists=True, file_okay=False, dir_okay=True), default=None, help="Ruta del proyecto. Por defecto, el directorio actual.")
 def push_command(path):
@@ -106,6 +116,8 @@ def history_command(limit, session_id):
             click.echo(f"Ruta de resultados: {session.get('results_dir')}")
             click.echo(f"Resumen MD: {session.get('summary_md_path')}")
             click.echo(f"Resumen HTML: {session.get('summary_html_path')}")
+            if session.get("agent_session_id"):
+                click.echo(f"Agent Session ID: {session.get('agent_session_id')}")
             click.echo("")
         for step in steps:
             click.echo(f"Fase: {step['step_label']} ({step['timestamp']})")
@@ -119,6 +131,8 @@ def history_command(limit, session_id):
 cli.add_command(dev_command)
 cli.add_command(unit_test_command)
 cli.add_command(unit_test_command, name="unit-test")
+cli.add_command(explain_command)
+cli.add_command(explain_command, name="--explain")
 cli.add_command(push_command)
 cli.add_command(history_command)
 

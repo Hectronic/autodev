@@ -44,13 +44,47 @@ def test_codex_command_generation(codex_client):
         assert "codex" in args[0]
         assert "exec" in args[0]
         assert "resume" not in args[0]
+        assert "--json" in args[0]
         
         # Iteration 2 (resume)
         codex_client.run_prompt("prompt 2", resume=True)
         args, _ = mock_run.call_args
         assert "resume" in args[0]
         assert "--last" in args[0]
+        assert "--json" in args[0]
         assert "prompt 2" in args[0]
+
+
+def test_codex_session_id_extraction_and_resume_with_session_id(codex_client):
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                '{"type":"thread.started","thread_id":"thread-abc-123"}\n'
+                '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}\n'
+            ),
+            stderr="",
+        )
+
+        response = codex_client.run_prompt("prompt 1")
+        args, _ = mock_run.call_args
+        assert response == "hello"
+        assert codex_client.session_id == "thread-abc-123"
+        assert "--json" in args[0]
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n',
+            stderr="",
+        )
+
+        codex_client.run_prompt("prompt 2", resume=True)
+        args, _ = mock_run.call_args
+        assert "resume" in args[0]
+        assert "thread-abc-123" in args[0]
+        assert "--last" not in args[0]
+        assert "--json" in args[0]
 
 def test_gemini_session_id_extraction(gemini_client):
     with patch("subprocess.run") as mock_run:

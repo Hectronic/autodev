@@ -1,6 +1,10 @@
 from unittest.mock import patch
 
-from autodev_cli.reporting import open_html_report, render_markdown_to_html
+from autodev_cli.reporting import (
+    open_html_report,
+    render_markdown_to_html,
+    write_sectioned_html_report,
+)
 
 
 def test_render_markdown_to_html_escapes_and_renders_code(tmp_path):
@@ -29,3 +33,25 @@ def test_open_html_report_returns_webbrowser_result(tmp_path):
         assert open_html_report(html_path) is False
 
     mock_open.assert_called_once()
+
+
+def test_write_sectioned_html_report_includes_navigation_and_sections(tmp_path):
+    html_path = tmp_path / "summary.html"
+    sections = [
+        {"id": "intro", "title": "Resumen ejecutivo", "markdown": "# Intro\n\n- punto 1"},
+        {"id": "stack", "title": "Stack", "markdown": "Python con unittest"},
+    ]
+
+    result = write_sectioned_html_report(
+        html_path,
+        sections,
+        {"title": "demo", "session_id": "session-1"},
+    )
+
+    assert result == html_path
+    content = html_path.read_text(encoding="utf-8")
+    assert "Indice" in content
+    assert 'href="#intro"' in content
+    assert 'href="#stack"' in content
+    assert "Resumen ejecutivo" in content
+    assert "Python con unittest" in content
