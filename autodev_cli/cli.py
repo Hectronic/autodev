@@ -116,6 +116,8 @@ def history_command(limit, session_id):
             click.echo(f"Ruta de resultados: {session.get('results_dir')}")
             click.echo(f"Resumen MD: {session.get('summary_md_path')}")
             click.echo(f"Resumen HTML: {session.get('summary_html_path')}")
+            if session.get("agent_session_id"):
+                click.echo(f"Agent Session ID: {session.get('agent_session_id')}")
             click.echo("")
         for step in steps:
             click.echo(f"Fase: {step['step_label']} ({step['timestamp']})")

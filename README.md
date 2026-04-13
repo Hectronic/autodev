@@ -78,6 +78,7 @@ Cada ejecución genera una carpeta propia dentro de la carpeta de datos:
 La ruta puede ajustarse con `XDG_DATA_HOME`.
 
 Si el comando se ejecuta de nuevo en una rama `autodev/*` que tenga una sesión `running`, la herramienta recupera esa sesión y continúa guardando en el mismo `session_id`.
+La salida distingue entre el `AutoDev Session ID` interno y el `Agent Session ID` del CLI externo (`codex` o `gemini`). El primero identifica la ejecución de `autodev`; el segundo es el que debe usarse para reanudar el agente si hace falta.
 En `-dev`, cuando la sesión es nueva, la herramienta carga `README.md`, `GEMINI.md` y `AGENTS.md` si existen, y añade una fase dedicada a documentar los cambios o actualizar la documentación del repositorio.
 En el flujo `-ut`, la sesión guarda también la rama base y el `merge-base` usado para la revisión. Además, contempla tanto cambios ya commiteados como cambios pendientes en el working tree, y presenta la diff en bloques Markdown separados.
 En el flujo `-e`/`--explain`, la sesión le pide al agente de IA que genere las secciones del reporte técnico del repositorio con cobertura de stack, arquitectura, diseño, funcionalidad, tests y riesgos, junto con un HTML standalone con navegación interna.

@@ -253,7 +253,10 @@ class AutoDevOrchestrator:
                 workflow_label="Development flow",
             )
 
-            print(f"Session ID: {self.session_id}")
+            print(f"AutoDev Session ID: {self.session_id}")
+            agent_session_id = self._get_agent_session_id()
+            if agent_session_id:
+                print(f"{self.agent_name.capitalize()} Session ID: {agent_session_id}")
             print(f"Branch: {self.branch_name}")
             print(f"Log and report saved in: {self.results_dir}")
         except Exception:
@@ -487,7 +490,10 @@ class AutoDevOrchestrator:
                 workflow_label="Unit test review",
             )
 
-            print(f"Session ID: {self.session_id}")
+            print(f"AutoDev Session ID: {self.session_id}")
+            agent_session_id = self._get_agent_session_id()
+            if agent_session_id:
+                print(f"{self.agent_name.capitalize()} Session ID: {agent_session_id}")
             print(f"Branch: {self.branch_name}")
             print(f"Base branch: {self.base_branch_name}")
             print(f"Log and report saved in: {self.results_dir}")
@@ -614,7 +620,10 @@ class AutoDevOrchestrator:
             print(final_markdown)
             print("=" * 40 + "\n")
 
-            print(f"Session ID: {self.session_id}")
+            print(f"AutoDev Session ID: {self.session_id}")
+            agent_session_id = self._get_agent_session_id()
+            if agent_session_id:
+                print(f"{self.agent_name.capitalize()} Session ID: {agent_session_id}")
             print(f"Branch: {self.branch_name or 'detached'}")
             print(f"Log and report saved in: {self.results_dir}")
         except Exception:
@@ -829,7 +838,8 @@ class AutoDevOrchestrator:
         report = validation_report.strip()
         return (
             "# Resumen de ejecución\n\n"
-            f"- Session ID: {self.session_id}\n"
+            f"- AutoDev Session ID: {self.session_id}\n"
+            f"{self._compose_agent_session_line()}"
             f"- Branch: {branch_name}\n"
             f"- Agent: {self.agent_name}\n"
             f"- Project path: {self.project_path}\n"
@@ -848,7 +858,8 @@ class AutoDevOrchestrator:
         report = validation_report.strip()
         return (
             "# Resumen de revision de cobertura\n\n"
-            f"- Session ID: {self.session_id}\n"
+            f"- AutoDev Session ID: {self.session_id}\n"
+            f"{self._compose_agent_session_line()}"
             f"- Branch: {self.branch_name}\n"
             f"- Base branch: {self.base_branch_name}\n"
             f"- Merge-base: {self.merge_base_sha}\n"
@@ -974,7 +985,8 @@ class AutoDevOrchestrator:
         project_info = snapshot.get("project_info", {})
         return (
             "# Informe de exploracion del repositorio\n\n"
-            f"- Session ID: {self.session_id}\n"
+            f"- AutoDev Session ID: {self.session_id}\n"
+            f"{self._compose_agent_session_line()}"
             f"- Branch: {self.branch_name or 'detached'}\n"
             f"- Project path: {self.project_path}\n"
             f"- Stack: {project_info.get('project_type', 'desconocido')} con {project_info.get('test_runner', 'desconocido')}\n"
@@ -1247,6 +1259,12 @@ class AutoDevOrchestrator:
             "reference_docs": [doc["name"] for doc in self.reference_docs],
         }
         self.storage.write_json(self.storage.session_file(self.session_id, "session.json"), payload)
+
+    def _compose_agent_session_line(self):
+        agent_session_id = self._get_agent_session_id()
+        if not agent_session_id:
+            return ""
+        return f"- {self.agent_name.capitalize()} Session ID: {agent_session_id}\n"
 
     def _finalize_session(self, status):
         if not self.session_id:

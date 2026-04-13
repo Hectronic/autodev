@@ -89,7 +89,7 @@ def test_orchestrator_runs_plan_develop_test_validate(tmp_path):
     with open(report_path, "r", encoding="utf-8") as handle:
         report = handle.read()
         assert "Validation report" in report
-        assert "Session ID:" in report
+        assert "AutoDev Session ID:" in report
         assert "Branch:" in report
 
     session_root = orchestrator.storage.base_dir / "sessions" / orchestrator.session_id
